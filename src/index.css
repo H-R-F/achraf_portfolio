@@ -1,0 +1,111 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-cream: #F8F7F4;
+  --color-cream-dark: #EFEDE7;
+  --color-obsidian: #0A0B0E;
+  --color-obsidian-surface: #12141A;
+  --color-ink: #16181D;
+  --color-ink-light: #2B2E38;
+  --color-stone: #5C606B;
+  --color-stone-light: #8C919E;
+  --color-accent: #1E3A8A;
+  --color-accent-light: #4C6EF5;
+  --color-warm: #9A6B3B;
+  --color-warm-light: #C4956A;
+  --color-line: #E2DFD7;
+  --color-line-dark: #222530;
+
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-display: 'Outfit', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Outfit', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  line-height: 1.65;
+  overflow-x: hidden;
+}
+
+/* Keep #root free of perspective/transform so fixed WebGL canvas stays viewport-pinned */
+#root {
+  position: relative;
+}
+
+::selection {
+  background-color: var(--color-accent);
+  color: #ffffff;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-stone-light);
+  border-radius: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  [style*="rotateX"], [style*="rotateY"], [style*="rotateZ"] {
+    transform: none !important;
+  }
+}
+
+.section-index {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  color: var(--color-stone);
+}
+
+.editorial-rule {
+  height: 1px;
+  background: linear-gradient(90deg, var(--color-accent) 0%, transparent 100%);
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+@keyframes scrollLine {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(220%);
+  }
+}
+
+.animate-scroll-line {
+  animation: scrollLine 1.8s ease-in-out infinite;
+}
+
+canvas {
+  touch-action: none;
+}
