@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { createStudioScene, type StudioSceneController } from '../three/createStudioScene';
-import { createDefaultStageState } from '../three/achrafCharacterStage';
+import {
+  createDefaultStageState,
+  type StageSectionKey,
+} from '../three/achrafCharacterStage';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -11,7 +14,23 @@ interface ScrollScene3DProps {
   replayNonce?: number;
 }
 
-type SectionKey = 'hero' | 'about' | 'experience' | 'projects' | 'skills' | 'contact';
+const LANE_SIDE: Record<StageSectionKey, 'left' | 'right'> = {
+  hero: 'right',
+  about: 'left',
+  experience: 'right',
+  projects: 'left',
+  skills: 'right',
+  contact: 'right',
+};
+
+const SECTIONS: StageSectionKey[] = [
+  'hero',
+  'about',
+  'experience',
+  'projects',
+  'skills',
+  'contact',
+];
 
 export default function ScrollScene3D({
   isDark = true,
@@ -52,7 +71,7 @@ export default function ScrollScene3D({
 
     // Projects a dedicated DOM [data-character-lane="<section>"] column center
     // directly into exact Three.js world X coordinates and responsive scale.
-    const getLanePlacement = (section: SectionKey, targetZ = 0.25) => {
+    const getLanePlacement = (section: StageSectionKey, targetZ = 0.25) => {
       const vFovRad = (camera.fov * Math.PI) / 180;
       const dist = camera.position.z - targetZ;
       const halfH = dist * Math.tan(vFovRad / 2);
@@ -68,12 +87,12 @@ export default function ScrollScene3D({
           const centerPx = rect.left + rect.width * 0.5;
           const ndcX = (centerPx / window.innerWidth) * 2 - 1;
           const worldX = ndcX * halfW;
-          const laneScale = Math.min(1.06, Math.max(0.86, rect.width / 335));
+          const laneScale = Math.min(1.06, Math.max(0.84, rect.width / 345));
           return { worldX, laneScale };
         }
       }
 
-      const isLeft = section === 'about' || section === 'projects';
+      const isLeft = LANE_SIDE[section] === 'left';
       const fallbackX = Math.min(2.75, Math.max(1.55, halfW * 0.72));
       return {
         worldX: isLeft ? -fallbackX : fallbackX,
@@ -82,40 +101,51 @@ export default function ScrollScene3D({
     };
 
     let activeAmbientTween: gsap.core.Tween | null = null;
-    let activeSection: SectionKey = 'hero';
+    let activeSection: StageSectionKey = 'hero';
 
     const stopAmbientReaction = () => {
       activeAmbientTween?.kill();
       activeAmbientTween = null;
     };
 
-    const enterSectionDesktop = (section: SectionKey) => {
+    const computeTurnDir = (from: StageSectionKey, to: StageSectionKey) => {
+      if (LANE_SIDE[from] === LANE_SIDE[to]) {
+        return SECTIONS.indexOf(to) >= SECTIONS.indexOf(from) ? 1 : -1;
+      }
+      return LANE_SIDE[to] === 'right' ? 1 : -1;
+    };
+
+    const enterSectionDesktop = (section: StageSectionKey) => {
       if (!characterState) return;
       const prevSection = activeSection;
+      if (prevSection === section && section !== 'hero') return;
       activeSection = section;
       stopAmbientReaction();
 
       gsap.killTweensOf(characterState);
       gsap.killTweensOf(camera.position);
 
+      const turnDir = computeTurnDir(prevSection, section);
+      sceneCtrl.setSectionPose(section, turnDir, prevSection === 'hero' && section === 'about');
+
       switch (section) {
         case 'hero': {
-          // Hero showcases the talking studio video; 3D character yields cleanly
+          // Position standby inside #about's left lane slightly set back so #about entry emerges forward without crossing copy
+          const { worldX } = getLanePlacement('about', 0.28);
           gsap.to(characterState, {
-            rootX: 1.55,
+            rootX: worldX,
             rootY: -1.18,
-            rootZ: 0.25,
-            rootRotY: -0.22,
-            scale: 1,
-            poseSlot: 0,
+            rootZ: -0.15,
+            rootRotY: -0.25,
+            scale: 0.96,
             stageOpacity: 0,
             offsetX: 0,
             offsetY: 0,
             tiltZ: 0,
             rimBoost: 0.22,
-            lightSide: -0.68,
+            lightSide: 0.68,
             lightIntensity: 1.05,
-            duration: 0.45,
+            duration: 0.42,
             ease: 'power2.out',
           });
           gsap.to(camera.position, {
@@ -129,11 +159,13 @@ export default function ScrollScene3D({
         }
 
         case 'about': {
-          // Character animation begins on the 2nd section (#about) and takes the Hero entrance & move
+          const { worldX, laneScale } = getLanePlacement('about', 0.28);
           if (prevSection === 'hero') {
+            // Reset cleanly in left lane before stepping forward with the Hero entrance move
+            gsap.set(characterState, { rootX: worldX, rootZ: -0.15 });
             sceneCtrl.replaySketch();
           }
-          const { worldX, laneScale } = getLanePlacement('about', 0.28);
+
           const heroEntryTl = gsap.timeline();
           heroEntryTl
             .to(characterState, {
@@ -141,31 +173,30 @@ export default function ScrollScene3D({
               rootY: -1.2,
               rootZ: 0.28,
               rootRotY: 0.22,
-              scale: laneScale * 1.04,
-              poseSlot: 0,
+              scale: laneScale * 1.03,
               stageOpacity: 1,
               offsetX: 0,
-              offsetY: 0.06,
-              tiltZ: 0.02,
-              rimBoost: 0.56,
+              offsetY: 0.055,
+              tiltZ: 0.018,
+              rimBoost: 0.62,
               lightSide: 0.68,
-              lightIntensity: 1.16,
-              duration: 0.72,
+              lightIntensity: 1.18,
+              duration: 0.68,
               ease: 'power3.out',
             })
             .to(characterState, {
-              scale: laneScale * 1.02,
+              scale: laneScale * 1.01,
               offsetY: 0,
               tiltZ: 0,
-              rimBoost: 0.3,
+              rimBoost: 0.28,
               lightIntensity: 1.1,
-              duration: 0.48,
+              duration: 0.46,
               ease: 'power2.out',
               onComplete: () => {
                 if (activeSection !== 'about') return;
                 activeAmbientTween = gsap.to(characterState, {
                   tiltZ: -0.014,
-                  offsetY: 0.025,
+                  offsetY: 0.024,
                   duration: 2.1,
                   yoyo: true,
                   repeat: -1,
@@ -173,11 +204,12 @@ export default function ScrollScene3D({
                 });
               },
             });
+
           gsap.to(camera.position, {
             x: 0.04,
             y: 0.14,
             z: 5.42,
-            duration: 0.9,
+            duration: 0.85,
             ease: 'power3.out',
           });
           break;
@@ -189,30 +221,42 @@ export default function ScrollScene3D({
           strideTl
             .to(characterState, {
               rootX: worldX,
-              rootY: -1.24,
-              rootZ: 0.22,
-              rootRotY: -0.26,
-              poseSlot: 1,
+              rootY: -1.23,
+              rootZ: 0.24,
+              rootRotY: -0.24,
               stageOpacity: 1,
-              scale: laneScale * 1.04,
-              offsetX: -0.06,
-              offsetY: 0.08,
-              tiltZ: -0.042,
-              rimBoost: 0.52,
-              lightSide: -0.75,
-              lightIntensity: 1.18,
-              duration: 0.55,
+              scale: laneScale * 1.03,
+              offsetX: -0.05,
+              offsetY: 0.07,
+              tiltZ: -0.036,
+              rimBoost: 0.56,
+              lightSide: -0.74,
+              lightIntensity: 1.2,
+              duration: 0.58,
               ease: 'power2.out',
             })
             .to(characterState, {
               scale: laneScale,
               offsetX: 0,
               offsetY: 0,
-              tiltZ: -0.012,
-              rimBoost: 0.24,
-              duration: 0.45,
-              ease: 'bounce.out',
+              tiltZ: -0.01,
+              rimBoost: 0.26,
+              lightIntensity: 1.12,
+              duration: 0.44,
+              ease: 'power2.out',
+              onComplete: () => {
+                if (activeSection !== 'experience') return;
+                activeAmbientTween = gsap.to(characterState, {
+                  offsetY: 0.022,
+                  tiltZ: 0.008,
+                  duration: 2.2,
+                  yoyo: true,
+                  repeat: -1,
+                  ease: 'sine.inOut',
+                });
+              },
             });
+
           gsap.to(camera.position, {
             x: -0.04,
             y: 0.1,
@@ -232,16 +276,15 @@ export default function ScrollScene3D({
               rootY: -1.22,
               rootZ: 0.3,
               rootRotY: 0.22,
-              poseSlot: 2,
               stageOpacity: 1,
               scale: laneScale * 1.03,
-              offsetX: 0.07,
+              offsetX: 0.06,
               offsetY: 0.05,
-              tiltZ: -0.03,
-              rimBoost: 0.88,
-              lightSide: 0.75,
+              tiltZ: -0.028,
+              rimBoost: 0.85,
+              lightSide: 0.74,
               lightIntensity: 1.24,
-              duration: 0.65,
+              duration: 0.62,
               ease: 'power3.out',
             })
             .to(characterState, {
@@ -250,9 +293,22 @@ export default function ScrollScene3D({
               offsetY: 0,
               tiltZ: -0.012,
               rimBoost: 0.3,
-              duration: 0.5,
+              lightIntensity: 1.14,
+              duration: 0.48,
               ease: 'power2.out',
+              onComplete: () => {
+                if (activeSection !== 'projects') return;
+                activeAmbientTween = gsap.to(characterState, {
+                  offsetY: 0.022,
+                  tiltZ: 0.01,
+                  duration: 2.3,
+                  yoyo: true,
+                  repeat: -1,
+                  ease: 'sine.inOut',
+                });
+              },
             });
+
           gsap.to(camera.position, {
             x: 0.04,
             y: 0.12,
@@ -268,18 +324,17 @@ export default function ScrollScene3D({
           gsap.to(characterState, {
             rootX: worldX,
             rootY: -1.24,
-            rootZ: 0.2,
+            rootZ: 0.22,
             rootRotY: -0.22,
             scale: laneScale,
-            poseSlot: 3,
             stageOpacity: 1,
             offsetX: 0,
             offsetY: 0,
             tiltZ: -0.015,
-            rimBoost: 0.38,
-            lightSide: -0.58,
-            lightIntensity: 1.1,
-            duration: 0.9,
+            rimBoost: 0.42,
+            lightSide: -0.62,
+            lightIntensity: 1.12,
+            duration: 0.76,
             ease: 'power3.out',
             onComplete: () => {
               if (activeSection !== 'skills') return;
@@ -293,11 +348,12 @@ export default function ScrollScene3D({
               });
             },
           });
+
           gsap.to(camera.position, {
             x: 0,
             y: 0.14,
             z: 5.45,
-            duration: 0.9,
+            duration: 0.85,
             ease: 'power3.out',
           });
           break;
@@ -313,29 +369,29 @@ export default function ScrollScene3D({
               rootZ: 0.24,
               rootRotY: -0.16,
               scale: laneScale * 1.03,
-              poseSlot: 4,
               stageOpacity: 1,
               offsetX: 0,
-              offsetY: 0.08,
-              tiltZ: -0.03,
+              offsetY: 0.075,
+              tiltZ: -0.028,
               rimBoost: 0.78,
               lightSide: -0.62,
-              lightIntensity: 1.26,
-              duration: 0.65,
+              lightIntensity: 1.24,
+              duration: 0.62,
               ease: 'back.out(1.4)',
             })
             .to(characterState, {
               scale: laneScale,
               offsetY: 0,
-              tiltZ: 0.025,
-              rimBoost: 0.32,
-              duration: 0.45,
+              tiltZ: 0.024,
+              rimBoost: 0.34,
+              lightIntensity: 1.14,
+              duration: 0.44,
               ease: 'power2.out',
               onComplete: () => {
                 if (activeSection !== 'contact') return;
                 activeAmbientTween = gsap.to(characterState, {
-                  tiltZ: -0.03,
-                  offsetY: 0.03,
+                  tiltZ: -0.028,
+                  offsetY: 0.028,
                   duration: 1.25,
                   yoyo: true,
                   repeat: -1,
@@ -343,6 +399,7 @@ export default function ScrollScene3D({
                 });
               },
             });
+
           gsap.to(camera.position, {
             x: 0,
             y: 0.12,
@@ -355,48 +412,65 @@ export default function ScrollScene3D({
       }
     };
 
-    const enterSectionMobile = (section: SectionKey) => {
+    const enterSectionMobile = (section: StageSectionKey) => {
       if (!characterState) return;
       const prevSection = activeSection;
+      if (prevSection === section && section !== 'hero') return;
       activeSection = section;
       stopAmbientReaction();
       gsap.killTweensOf(characterState);
+
+      const turnDir = computeTurnDir(prevSection, section);
+      sceneCtrl.setSectionPose(section, turnDir, prevSection === 'hero' && section === 'about');
 
       if (section === 'about' && prevSection === 'hero') {
         sceneCtrl.replaySketch();
       }
 
       const mobileMap: Record<
-        SectionKey,
-        { poseSlot: number; rootX: number; rootRotY: number; tiltZ: number }
+        StageSectionKey,
+        { rootX: number; rootRotY: number; tiltZ: number; lightSide: number }
       > = {
-        hero: { poseSlot: 0, rootX: 0, rootRotY: -0.08, tiltZ: 0 },
-        about: { poseSlot: 0, rootX: -0.25, rootRotY: 0.16, tiltZ: 0.015 },
-        experience: { poseSlot: 1, rootX: 0.25, rootRotY: -0.16, tiltZ: -0.02 },
-        projects: { poseSlot: 2, rootX: -0.22, rootRotY: 0.14, tiltZ: -0.02 },
-        skills: { poseSlot: 3, rootX: 0.22, rootRotY: -0.14, tiltZ: -0.01 },
-        contact: { poseSlot: 4, rootX: 0, rootRotY: 0, tiltZ: 0.02 },
+        hero: { rootX: -0.2, rootRotY: -0.08, tiltZ: 0, lightSide: 0.5 },
+        about: { rootX: -0.2, rootRotY: 0.15, tiltZ: 0.015, lightSide: 0.6 },
+        experience: { rootX: 0.22, rootRotY: -0.15, tiltZ: -0.02, lightSide: -0.6 },
+        projects: { rootX: -0.2, rootRotY: 0.14, tiltZ: -0.018, lightSide: 0.6 },
+        skills: { rootX: 0.2, rootRotY: -0.14, tiltZ: -0.01, lightSide: -0.58 },
+        contact: { rootX: 0, rootRotY: 0, tiltZ: 0.02, lightSide: -0.55 },
       };
 
       const target = mobileMap[section];
       gsap.to(characterState, {
         ...target,
-        rootY: -1.2,
-        rootZ: -0.85,
+        rootY: -1.18,
+        rootZ: -0.88,
         scale: 1,
         stageOpacity: section === 'hero' ? 0 : 1,
         offsetX: 0,
         offsetY: 0.04,
-        duration: 0.75,
+        duration: 0.68,
         ease: 'power3.out',
         onComplete: () => {
           gsap.to(characterState, {
             offsetY: 0,
-            duration: 0.35,
+            duration: 0.32,
             ease: 'power2.out',
           });
         },
       });
+    };
+
+    const detectActiveSection = (): StageSectionKey => {
+      const mid = window.innerHeight * 0.54;
+      for (let i = SECTIONS.length - 1; i >= 0; i--) {
+        const el = document.getElementById(SECTIONS[i]);
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.top <= mid) {
+          return SECTIONS[i];
+        }
+      }
+      return 'hero';
     };
 
     const ctx = gsap.context(() => {
@@ -409,46 +483,55 @@ export default function ScrollScene3D({
         gsap.set(camera.position, { x: 0, y: 0.12, z: 5.5 });
 
         if (characterState) {
-          gsap.set(characterState, createDefaultStageState());
+          const { worldX } = getLanePlacement('about', 0.28);
+          gsap.set(characterState, {
+            ...createDefaultStageState(),
+            rootX: worldX,
+            rootZ: -0.15,
+          });
         }
 
-        const sections: SectionKey[] = [
-          'hero',
-          'about',
-          'experience',
-          'projects',
-          'skills',
-          'contact',
-        ];
-
-        sections.forEach((sec) => {
+        // Continuous zero-gap ScrollTriggers (top 56% / bottom 56% handoff matches both scroll directions)
+        SECTIONS.forEach((sec) => {
           const el = document.getElementById(sec);
           if (!el) return;
           ScrollTrigger.create({
             trigger: el,
-            start: sec === 'hero' ? 'top 62%' : 'top 76%',
-            end: 'bottom 38%',
+            start: 'top 56%',
+            end: 'bottom 56%',
             onEnter: () => enterSectionDesktop(sec),
             onEnterBack: () => enterSectionDesktop(sec),
           });
         });
 
-        // Guarantee exact top/bottom boundary locks + optional GLB animation progress
+        // Continuous scroll momentum + top/bottom boundary guarantees
         ScrollTrigger.create({
           trigger: scrollRoot,
           start: 'top top',
           end: 'bottom bottom',
-          scrub: 0.8,
+          scrub: 0.6,
           invalidateOnRefresh: true,
           onUpdate: (self) => {
             sceneCtrl.setScrollAnimationProgress(self.progress);
-            if (self.progress <= 0.01 && activeSection !== 'hero') {
+            if (characterState) {
+              characterState.scrollMotion = Math.max(
+                -1,
+                Math.min(1, self.getVelocity() / 2200),
+              );
+            }
+            if (self.progress <= 0.015 && activeSection !== 'hero') {
               enterSectionDesktop('hero');
-            } else if (self.progress >= 0.96 && activeSection !== 'contact') {
+            } else if (self.progress >= 0.94 && activeSection !== 'contact') {
               enterSectionDesktop('contact');
             }
           },
         });
+
+        // Sync initial section immediately if user loads mid-page
+        const initialSec = detectActiveSection();
+        if (initialSec !== 'hero') {
+          enterSectionDesktop(initialSec);
+        }
       });
 
       mm.add('(max-width: 1023px)', () => {
@@ -459,33 +542,48 @@ export default function ScrollScene3D({
         if (characterState) {
           gsap.set(characterState, {
             ...createDefaultStageState(),
-            rootX: 0,
-            rootY: -1.2,
-            rootZ: -0.85,
+            rootX: -0.2,
+            rootY: -1.18,
+            rootZ: -0.88,
             rootRotY: -0.06,
           });
         }
 
-        const sections: SectionKey[] = [
-          'hero',
-          'about',
-          'experience',
-          'projects',
-          'skills',
-          'contact',
-        ];
-
-        sections.forEach((sec) => {
+        SECTIONS.forEach((sec) => {
           const el = document.getElementById(sec);
           if (!el) return;
           ScrollTrigger.create({
             trigger: el,
-            start: 'top 62%',
-            end: 'bottom 38%',
+            start: 'top 56%',
+            end: 'bottom 56%',
             onEnter: () => enterSectionMobile(sec),
             onEnterBack: () => enterSectionMobile(sec),
           });
         });
+
+        ScrollTrigger.create({
+          trigger: scrollRoot,
+          start: 'top top',
+          end: 'bottom bottom',
+          onUpdate: (self) => {
+            if (characterState) {
+              characterState.scrollMotion = Math.max(
+                -1,
+                Math.min(1, self.getVelocity() / 2200),
+              );
+            }
+            if (self.progress <= 0.015 && activeSection !== 'hero') {
+              enterSectionMobile('hero');
+            } else if (self.progress >= 0.94 && activeSection !== 'contact') {
+              enterSectionMobile('contact');
+            }
+          },
+        });
+
+        const initialSec = detectActiveSection();
+        if (initialSec !== 'hero') {
+          enterSectionMobile(initialSec);
+        }
       });
     });
 
@@ -512,7 +610,17 @@ export default function ScrollScene3D({
     };
 
     const handleRefreshScroll = () => {
-      requestAnimationFrame(() => ScrollTrigger.refresh());
+      requestAnimationFrame(() => {
+        ScrollTrigger.refresh();
+        const currentSec = detectActiveSection();
+        if (currentSec !== activeSection) {
+          if (window.innerWidth >= 1024) {
+            enterSectionDesktop(currentSec);
+          } else {
+            enterSectionMobile(currentSec);
+          }
+        }
+      });
     };
 
     const handlePointerMove = (e: PointerEvent) => {
@@ -525,7 +633,8 @@ export default function ScrollScene3D({
       sceneCtrl.resize();
       if (window.innerWidth >= 1024 && characterState) {
         if (activeSection === 'hero') {
-          gsap.set(characterState, { rootX: 1.55, scale: 1 });
+          const { worldX } = getLanePlacement('about', 0.28);
+          gsap.set(characterState, { rootX: worldX, scale: 0.96 });
         } else {
           const { worldX, laneScale } = getLanePlacement(
             activeSection,
@@ -565,7 +674,7 @@ export default function ScrollScene3D({
       <div
         ref={canvasMountRef}
         aria-hidden="true"
-        className="fixed inset-0 z-0 lg:z-[15] pointer-events-none opacity-30 lg:opacity-100 transition-opacity duration-300"
+        className="fixed inset-0 z-0 lg:z-[15] pointer-events-none opacity-35 lg:opacity-100 transition-opacity duration-300"
       />
 
       <div
@@ -574,14 +683,14 @@ export default function ScrollScene3D({
           isReady ? 'opacity-0 translate-y-2' : 'opacity-100 translate-y-0'
         }`}
       >
-        <div className="px-3.5 py-2 rounded-md border border-line dark:border-line-dark bg-cream/95 dark:bg-[#12141A]/95 shadow-sm">
-          <div className="flex items-center justify-between gap-4 font-mono text-[11px] tracking-wider text-stone dark:text-stone-light">
+        <div className="px-3.5 py-2 rounded-md border border-line-dark bg-[#12141A]/95 shadow-sm">
+          <div className="flex items-center justify-between gap-4 font-mono text-[11px] tracking-wider text-stone-light">
             <span>Loading 3D Character</span>
             <span className="tabular-nums">{progress}%</span>
           </div>
-          <div className="mt-1.5 h-0.5 w-32 bg-line dark:bg-line-dark overflow-hidden">
+          <div className="mt-1.5 h-0.5 w-32 bg-line-dark overflow-hidden">
             <div
-              className="h-full bg-accent dark:bg-warm-light transition-all duration-200"
+              className="h-full bg-warm-light transition-all duration-200"
               style={{ width: `${progress}%` }}
             />
           </div>

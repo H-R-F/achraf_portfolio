@@ -6,6 +6,91 @@ import presentingUrl from '../assets/images/achraf_real_presenting_1795220794290
 import welcomeUrl from '../assets/images/achraf_real_welcome_v2_1795220815685.jpg';
 
 export type CharacterPoseKey = 'tpose' | 'hero' | 'analyst' | 'presenting' | 'welcome';
+export type StageSectionKey = 'hero' | 'about' | 'experience' | 'projects' | 'skills' | 'contact';
+
+export const SECTION_POSES: Record<
+  StageSectionKey,
+  { key: CharacterPoseKey; flipX: boolean }
+> = {
+  hero: { key: 'hero', flipX: false },
+  about: { key: 'hero', flipX: false },        // 2nd section: adopts Hero move facing right onto About
+  experience: { key: 'presenting', flipX: true }, // 3rd section: right lane gesturing left onto Experience
+  projects: { key: 'presenting', flipX: false },  // 4th section: left lane gesturing right onto Projects
+  skills: { key: 'analyst', flipX: true },     // 5th section: right lane looking left onto Matrix
+  contact: { key: 'welcome', flipX: false },   // 6th section: right lane warm wave greeting
+};
+
+export interface SectionLightPalette {
+  key: string;
+  fill: string;
+  rim: string;
+  kicker: string;
+  beam: string;
+  beamSecondary: string;
+  ring: string;
+}
+
+export const SECTION_LIGHT_PALETTES: Record<StageSectionKey, SectionLightPalette> = {
+  hero: {
+    key: '#FFF1DE',
+    fill: '#82A0FF',
+    rim: '#E0B280',
+    kicker: '#6D8EFF',
+    beam: '#E8C294',
+    beamSecondary: '#5B7CFA',
+    ring: '#C4956A',
+  },
+  about: {
+    // Classic warm tungsten portrait key + brass rim with cool lapis shadow fill
+    key: '#FFF2E0',
+    fill: '#7FA1FF',
+    rim: '#E4B582',
+    kicker: '#6B8EFF',
+    beam: '#EDC89A',
+    beamSecondary: '#4C6EF5',
+    ring: '#CFA070',
+  },
+  experience: {
+    // Broadcast stage clarity: crisp studio daylight key + electric cobalt rim vs copper kicker
+    key: '#F4F7FF',
+    fill: '#89A6FF',
+    rim: '#6B8CFF',
+    kicker: '#DDA16C',
+    beam: '#7C9CFF',
+    beamSecondary: '#D4A574',
+    ring: '#6485F5',
+  },
+  projects: {
+    // Architectural gallery contrast: luminous gold spotlight + deep sapphire rim
+    key: '#FFEBD2',
+    fill: '#7E9EFF',
+    rim: '#5C7CFA',
+    kicker: '#E8B884',
+    beam: '#F2CFA0',
+    beamSecondary: '#5C7CFA',
+    ring: '#D4A574',
+  },
+  skills: {
+    // Law (warm brass) × Systems (vivid cobalt) dual-split regulatory lighting
+    key: '#EEF4FF',
+    fill: '#84A3FF',
+    rim: '#4C6EF5',
+    kicker: '#DFAA74',
+    beam: '#6384FA',
+    beamSecondary: '#D4A574',
+    ring: '#5B7CFA',
+  },
+  contact: {
+    // Warm golden hospitality glow beside Contact frame
+    key: '#FFF4E6',
+    fill: '#94B0FF',
+    rim: '#EAB882',
+    kicker: '#82A0FF',
+    beam: '#F2CE9C',
+    beamSecondary: '#748FFC',
+    ring: '#D4A574',
+  },
+};
 
 export interface CharacterStageState {
   rootX: number;
@@ -21,10 +106,10 @@ export interface CharacterStageState {
   lightSide: number;
   /** Studio spotlight intensity multiplier (0.7..1.4) */
   lightIntensity: number;
-  /** Continuous timeline slot: 0..4 (about=hero -> experience -> projects -> skills -> contact) */
-  poseSlot: number;
   /** Overall 3D stage opacity (0 in Hero video view -> 1 across scrolling sections) */
   stageOpacity: number;
+  /** Damped scroll-velocity impulse (-1..1) for live scroll physics */
+  scrollMotion: number;
 }
 
 export function createDefaultStageState(): CharacterStageState {
@@ -37,19 +122,26 @@ export function createDefaultStageState(): CharacterStageState {
     offsetX: 0,
     offsetY: 0,
     tiltZ: 0,
-    rimBoost: 0.16,
-    lightSide: -0.65,
-    lightIntensity: 1.0,
-    poseSlot: 0,
+    rimBoost: 0.2,
+    lightSide: 0.68,
+    lightIntensity: 1.08,
     stageOpacity: 0,
+    scrollMotion: 0,
   };
 }
 
 export interface AchrafStageHandle {
   group: THREE.Group;
   state: CharacterStageState;
+  activeLightColors: {
+    key: THREE.Color;
+    rim: THREE.Color;
+    fill: THREE.Color;
+    beam: THREE.Color;
+  };
   loadAllPoses: (onProgress?: (percent: number) => void) => Promise<void>;
   update: (elapsed: number, delta: number, pointerX: number, pointerY: number) => void;
+  setSectionPose: (section: StageSectionKey, turnDirection?: number, instant?: boolean) => void;
   playIntroFromTPose: () => void;
   setTheme: (isDark: boolean) => void;
 }
@@ -61,14 +153,6 @@ const POSE_URLS: Record<CharacterPoseKey, string> = {
   presenting: presentingUrl,
   welcome: welcomeUrl,
 };
-
-const SCROLL_SEQUENCE: { key: CharacterPoseKey; flipX: boolean }[] = [
-  { key: 'hero', flipX: false },       // 0: Hero standby & About / 2nd section (takes Hero move: upright stance on left lane)
-  { key: 'presenting', flipX: true },  // 1: Experience / 3rd section (right lane, gestures left toward content)
-  { key: 'presenting', flipX: false }, // 2: Projects / 4th section (left lane, gestures right toward content)
-  { key: 'analyst', flipX: true },     // 3: Skills / 5th section (right lane, flipped left to analyze regulatory matrix)
-  { key: 'welcome', flipX: false },    // 4: Contact / 6th section (right lane, warm greeting wave)
-];
 
 function loadHtmlImage(src: string, signal?: AbortSignal): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -179,15 +263,15 @@ function buildAlignedCharacterTexture(
 
   // Seed outer perimeter pixels
   for (let x = 0; x < w; x++) {
-    if (isNeutralBgPixel(x, 42, 38)) enqueue(x);
+    if (isNeutralBgPixel(x, 46, 36)) enqueue(x);
     const bot = (h - 1) * w + x;
-    if (isNeutralBgPixel(bot, 42, 38)) enqueue(bot);
+    if (isNeutralBgPixel(bot, 46, 36)) enqueue(bot);
   }
   for (let y = 1; y < h - 1; y++) {
     const left = y * w;
-    if (isNeutralBgPixel(left, 42, 38)) enqueue(left);
+    if (isNeutralBgPixel(left, 46, 36)) enqueue(left);
     const right = y * w + (w - 1);
-    if (isNeutralBgPixel(right, 42, 38)) enqueue(right);
+    if (isNeutralBgPixel(right, 46, 36)) enqueue(right);
   }
 
   // Border-connected BFS
@@ -196,21 +280,34 @@ function buildAlignedCharacterTexture(
     isBg[p] = 1;
     const x = p % w;
     const y = (p - x) / w;
-    if (x > 0 && !visited[p - 1] && isNeutralBgPixel(p - 1, 38, 36)) enqueue(p - 1);
-    if (x < w - 1 && !visited[p + 1] && isNeutralBgPixel(p + 1, 38, 36)) enqueue(p + 1);
-    if (y > 0 && !visited[p - w] && isNeutralBgPixel(p - w, 38, 36)) enqueue(p - w);
-    if (y < h - 1 && !visited[p + w] && isNeutralBgPixel(p + w, 38, 36)) enqueue(p + w);
+    if (x > 0 && !visited[p - 1] && isNeutralBgPixel(p - 1, 38, 32)) enqueue(p - 1);
+    if (x < w - 1 && !visited[p + 1] && isNeutralBgPixel(p + 1, 38, 32)) enqueue(p + 1);
+    if (y > 0 && !visited[p - w] && isNeutralBgPixel(p - w, 38, 32)) enqueue(p - w);
+    if (y < h - 1 && !visited[p + w] && isNeutralBgPixel(p + w, 38, 32)) enqueue(p + w);
   }
 
-  // Also clear enclosed neutral-grey pockets matching backdrop slate hue (e.g. elbow gap)
+  // Clear enclosed neutral-grey studio pockets (e.g. shadowed triangle inside bent elbow in Hero pose)
+  const bgLum = (bgR + bgG + bgB) / 3;
   const bgTintBR = bgB - bgR;
+  const isEnclosedNeutralPocket = (pIdx: number) => {
+    const o = pIdx * 4;
+    const r = data[o];
+    const g = data[o + 1];
+    const b = data[o + 2];
+    const maxC = Math.max(r, g, b);
+    const minC = Math.min(r, g, b);
+    if (maxC - minC > 24) return false;
+    const lum = (r + g + b) / 3;
+    // Exclude bright white cotton shirt & dark navy suit shadow
+    if (lum < bgLum - 48 || lum > bgLum + 22) return false;
+    return Math.abs((b - r) - bgTintBR) <= 14;
+  };
+
   const pocketVisited = new Uint8Array(total);
   const compIndices = new Int32Array(total);
   for (let i = 0; i < total; i++) {
     if (isBg[i] || pocketVisited[i]) continue;
-    if (!isNeutralBgPixel(i, 18, 28)) continue;
-    const o0 = i * 4;
-    if (Math.abs((data[o0 + 2] - data[o0]) - bgTintBR) > 12) continue;
+    if (!isEnclosedNeutralPocket(i)) continue;
 
     let pHead = 0;
     let pTail = 0;
@@ -232,8 +329,7 @@ function buildAlignedCharacterTexture(
           n >= 0 &&
           !isBg[n] &&
           !pocketVisited[n] &&
-          isNeutralBgPixel(n, 22, 30) &&
-          Math.abs((data[n * 4 + 2] - data[n * 4]) - bgTintBR) <= 14
+          isEnclosedNeutralPocket(n)
         ) {
           pocketVisited[n] = 1;
           compIndices[pTail++] = n;
@@ -241,14 +337,31 @@ function buildAlignedCharacterTexture(
       }
     }
 
-    if (pTail >= 85) {
+    if (pTail >= 60) {
       for (let k = 0; k < pTail; k++) {
         isBg[compIndices[k]] = 1;
       }
     }
   }
 
-  // Apply crisp anti-aliased edge alpha + halo-free decontamination
+  // Compute 1px and 2px border proximity masks for feathered halo-free matte decontamination
+  const isRing1 = new Uint8Array(total);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (isBg[p]) continue;
+      if (
+        (x > 0 && isBg[p - 1]) ||
+        (x < w - 1 && isBg[p + 1]) ||
+        (y > 0 && isBg[p - w]) ||
+        (y < h - 1 && isBg[p + w])
+      ) {
+        isRing1[p] = 1;
+      }
+    }
+  }
+
+  // Apply crisp anti-aliased edge alpha + exact background color unmixing (eliminates grey studio halo on dark mode)
   let minX = w;
   let maxX = 0;
   let minY = h;
@@ -263,26 +376,34 @@ function buildAlignedCharacterTexture(
         continue;
       }
 
-      let bgNeighbors = 0;
-      if (x > 0 && isBg[p - 1]) bgNeighbors++;
-      if (x < w - 1 && isBg[p + 1]) bgNeighbors++;
-      if (y > 0 && isBg[p - w]) bgNeighbors++;
-      if (y < h - 1 && isBg[p + w]) bgNeighbors++;
+      const nearRing1 =
+        !isRing1[p] &&
+        ((x > 0 && isRing1[p - 1]) ||
+          (x < w - 1 && isRing1[p + 1]) ||
+          (y > 0 && isRing1[p - w]) ||
+          (y < h - 1 && isRing1[p + w]));
 
-      if (bgNeighbors > 0) {
+      if (isRing1[p] || nearRing1) {
         const r = data[o];
         const g = data[o + 1];
         const b = data[o + 2];
         const dist = Math.hypot(r - bgR, g - bgG, b - bgB);
-        const edgeAlpha = Math.min(1, Math.max(0.12, (dist - 16) / 34));
+        const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+        const warmBias = chroma > 24 ? 0.14 : 0;
+
+        const rawAlpha = isRing1[p]
+          ? (dist - 12) / 38 + warmBias
+          : (dist - 4) / 30 + 0.25 + warmBias;
+        const edgeAlpha = Math.min(1, Math.max(0.02, rawAlpha));
         data[o + 3] = Math.round(edgeAlpha * 255);
-        // Gentle edge spill suppression toward luminance-matched subject tone (no orange/blue overshoot)
-        if (edgeAlpha < 0.96) {
-          const pull = Math.min(0.45, (1 - edgeAlpha) * 0.55);
-          const avg = (r + g + b) / 3;
-          data[o] = Math.min(255, Math.max(0, Math.round(r - (bgR - avg) * pull * 0.35)));
-          data[o + 1] = Math.min(255, Math.max(0, Math.round(g - (bgG - avg) * pull * 0.35)));
-          data[o + 2] = Math.min(255, Math.max(0, Math.round(b - (bgB - avg) * pull * 0.35)));
+
+        // True foreground color unmixing: C_fg = (C_obs - (1 - a) * C_bg) / a
+        if (edgeAlpha < 0.98) {
+          const denom = Math.max(edgeAlpha, 0.24);
+          const bgContrib = 1 - edgeAlpha;
+          data[o] = Math.min(255, Math.max(0, Math.round((r - bgContrib * bgR) / denom)));
+          data[o + 1] = Math.min(255, Math.max(0, Math.round((g - bgContrib * bgG) / denom)));
+          data[o + 2] = Math.min(255, Math.max(0, Math.round((b - bgContrib * bgB) / denom)));
         }
       } else {
         data[o + 3] = 255;
@@ -363,15 +484,25 @@ function buildAlignedCharacterTexture(
 const CHARACTER_VERTEX_SHADER = /* glsl */ `
   uniform float uTime;
   uniform float uBreath;
+  uniform float uTurnLean;
+  uniform vec2 uPointer;
   varying vec2 vUv;
 
   void main() {
     vUv = uv;
     vec3 pos = position;
-    // Subtle living chest breathing & shoulder settle
-    float upperMask = smoothstep(0.28, 0.72, uv.y);
-    pos.y += upperMask * uBreath * 0.012;
+
+    // Anchor shoes cleanly at floor baseline while upper torso breathes and turns in 2.5D
+    float footPin = smoothstep(0.10, 0.28, uv.y);
+    float upperMask = smoothstep(0.28, 0.74, uv.y);
+    float headMask = smoothstep(0.56, 0.90, uv.y);
+
+    pos.y += upperMask * uBreath * 0.011;
     pos.x *= 1.0 + sin(uv.y * 3.14159) * uBreath * 0.004;
+    pos.x += headMask * uPointer.x * 0.024;
+    pos.z += (uv.x - 0.5) * uPointer.x * headMask * 0.11;
+    pos.z += footPin * (uv.x - 0.5) * uTurnLean * 0.24;
+
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
   }
 `;
@@ -388,6 +519,7 @@ const CHARACTER_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uKeyColor;
   uniform vec3 uFillColor;
   uniform vec3 uRimColor;
+  uniform vec3 uKickerColor;
   uniform vec2 uPointer;
   varying vec2 vUv;
 
@@ -405,11 +537,11 @@ const CHARACTER_FRAGMENT_SHADER = /* glsl */ `
     if (tex.a < 0.02 || uOpacity <= 0.005) discard;
 
     // Screen-space anti-aliased silhouette edge
-    float edgeFw = max(fwidth(tex.a), 0.02);
-    float smoothAlpha = smoothstep(0.08, 0.08 + edgeFw * 1.4, tex.a);
+    float edgeFw = max(fwidth(tex.a), 0.018);
+    float smoothAlpha = smoothstep(0.06, 0.06 + edgeFw * 1.35, tex.a);
 
     // 4K Micro-Clarity unsharp filter preserving smooth skin & crisping eyes, hair, beard & blazer weave
-    vec2 detailStep = vec2(uTexelSize * 1.5);
+    vec2 detailStep = vec2(uTexelSize * 1.45);
     vec3 cL = samplePose(vUv - vec2(detailStep.x, 0.0)).rgb;
     vec3 cR = samplePose(vUv + vec2(detailStep.x, 0.0)).rgb;
     vec3 cB = samplePose(vUv - vec2(0.0, detailStep.y)).rgb;
@@ -417,9 +549,9 @@ const CHARACTER_FRAGMENT_SHADER = /* glsl */ `
     vec3 localMean = (cL + cR + cB + cT) * 0.25;
     vec3 highFreq = tex.rgb - localMean;
     float edgeDetailMask = smoothstep(0.012, 0.075, length(highFreq)) * smoothstep(0.45, 0.95, tex.a);
-    vec3 crispBase = clamp(tex.rgb + highFreq * (0.48 * edgeDetailMask), 0.0, 1.0);
+    vec3 crispBase = clamp(tex.rgb + highFreq * (0.46 * edgeDetailMask), 0.0, 1.0);
 
-    // Smooth surface normal from silhouette gradient + gentle fabric micro-relief (no noisy bumps on skin)
+    // Smooth surface normal from silhouette gradient + gentle fabric micro-relief
     vec2 px = vec2(0.0022);
     float aL = samplePose(vUv - vec2(px.x, 0.0)).a;
     float aR = samplePose(vUv + vec2(px.x, 0.0)).a;
@@ -432,7 +564,7 @@ const CHARACTER_FRAGMENT_SHADER = /* glsl */ `
     float lR = lum(samplePose(vUv + vec2(normStep.x, 0.0)).rgb);
     float lB = lum(samplePose(vUv - vec2(0.0, normStep.y)).rgb);
     float lT = lum(samplePose(vUv + vec2(0.0, normStep.y)).rgb);
-    vec2 microGrad = vec2(lL - lR, lB - lT) * 0.42;
+    vec2 microGrad = vec2(lL - lR, lB - lT) * 0.38;
 
     float bodyCurveX = (vUv.x - 0.5) * 0.85;
     vec3 normal = normalize(vec3(
@@ -441,30 +573,41 @@ const CHARACTER_FRAGMENT_SHADER = /* glsl */ `
       0.92
     ));
 
-    // Studio three-point light rig directions
-    vec3 keyDir = normalize(vec3(uLightSide + uPointer.x * 0.28, 0.52 + uPointer.y * 0.2, 0.72));
+    // Three-point + dual-split creative studio rig
+    vec3 keyDir = normalize(vec3(uLightSide + uPointer.x * 0.3, 0.56 + uPointer.y * 0.2, 0.74));
     vec3 fillDir = normalize(vec3(-uLightSide * 0.85, 0.18, 0.65));
     vec3 viewDir = vec3(0.0, 0.0, 1.0);
 
     float ndlKey = max(dot(normal, keyDir), 0.0);
     float ndlFill = max(dot(normal, fillDir), 0.0);
-    float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 2.5);
+    float fresnel = pow(1.0 - max(dot(normal, viewDir), 0.0), 2.7);
 
     vec3 halfVec = normalize(keyDir + viewDir);
-    float spec = pow(max(dot(normal, halfVec), 0.0), 26.0) * 0.14;
+    float spec = pow(max(dot(normal, halfVec), 0.0), 28.0) * 0.12;
 
-    float edgeStrength = clamp(length(silGrad) * 1.45, 0.0, 1.0);
-    vec2 rimDir2D = normalize(vec2(-uLightSide + uPointer.x * 0.35, 0.65));
+    float edgeStrength = clamp(length(silGrad) * 1.48, 0.0, 1.0);
+    vec2 rimDir2D = normalize(vec2(-uLightSide + uPointer.x * 0.32, 0.62));
+    vec2 kickerDir2D = normalize(vec2(uLightSide + uPointer.x * 0.22, 0.48));
     float rimAlign = clamp(dot(normalize(-silGrad + vec2(0.0001)), rimDir2D), 0.0, 1.0);
+    float kickerAlign = clamp(dot(normalize(-silGrad + vec2(0.0001)), kickerDir2D), 0.0, 1.0);
 
-    float baseAmb = mix(0.89, 0.84, uIsDark);
+    // Overhead studio falloff favors upper torso/face + warm floor bounce lifts dark shoes & hems
+    float overheadFalloff = mix(0.84, 1.06, smoothstep(0.14, 0.86, vUv.y));
+    float floorBounce = (1.0 - smoothstep(0.02, 0.34, vUv.y)) * 0.14;
+
+    float baseLuma = lum(crispBase);
+    float highlightProtect = 1.0 - smoothstep(0.58, 0.92, baseLuma) * 0.55;
+
+    float baseAmb = mix(0.86, 0.82, uIsDark) * overheadFalloff;
     vec3 lighting = vec3(baseAmb);
-    lighting += uKeyColor * (ndlKey * 0.24 * uLightIntensity);
-    lighting += uFillColor * (ndlFill * 0.18);
+    lighting += uKeyColor * (ndlKey * 0.25 * uLightIntensity * highlightProtect);
+    lighting += uFillColor * (ndlFill * 0.16 * highlightProtect);
+    lighting += mix(uKeyColor, uRimColor, 0.5) * floorBounce;
 
     vec3 color = crispBase * lighting;
-    color += uKeyColor * spec * uLightIntensity;
-    color += uRimColor * ((edgeStrength * rimAlign * 0.30 + fresnel * 0.10) * (1.0 + uRimBoost * 0.85));
+    color += uKeyColor * (spec * uLightIntensity * highlightProtect);
+    color += uRimColor * ((edgeStrength * rimAlign * 0.34 + fresnel * 0.08) * (1.0 + uRimBoost * 0.88));
+    color += uKickerColor * ((edgeStrength * kickerAlign * 0.22 + fresnel * 0.04) * (0.85 + uRimBoost * 0.5));
 
     gl_FragColor = vec4(color, smoothAlpha * uOpacity);
     #include <tonemapping_fragment>
@@ -482,22 +625,32 @@ const STUDIO_BEAM_VERTEX_SHADER = /* glsl */ `
 
 const STUDIO_BEAM_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uBeamColor;
+  uniform vec3 uBeamSecondary;
   uniform float uIntensity;
   uniform float uLightSide;
+  uniform float uTime;
+  uniform vec2 uPointer;
   uniform float uIsDark;
   varying vec2 vUv;
 
   void main() {
-    // Diagonal overhead studio spotlight cone sweeping down onto the character
-    float topNarrow = mix(0.28, 0.56, 1.0 - vUv.y);
-    float centerShift = 0.5 + (vUv.y - 0.5) * uLightSide * 0.18;
+    // Diagonal dual-tone volumetric spotlight cone + atmospheric edge scatter tracking pointer
+    float beamAim = uLightSide * 0.22 + uPointer.x * 0.08;
+    float topNarrow = mix(0.22, 0.62, 1.0 - vUv.y);
+    float centerShift = 0.5 + (vUv.y - 0.5) * beamAim;
     float distX = abs(vUv.x - centerShift) / topNarrow;
-    float cone = exp(-distX * distX * 2.6);
 
-    float vertFade = smoothstep(0.0, 0.25, vUv.y) * smoothstep(1.0, 0.42, vUv.y);
-    float alpha = cone * vertFade * uIntensity * mix(0.08, 0.2, uIsDark);
+    float coreCone = exp(-distX * distX * 3.8);
+    float outerAura = exp(-distX * distX * 1.15);
 
-    gl_FragColor = vec4(uBeamColor, alpha);
+    // Subtle atmospheric light shaft shimmer
+    float rayBand = 0.92 + 0.08 * sin(vUv.x * 18.0 + uTime * 0.45 - vUv.y * 4.0);
+    float vertFade = smoothstep(0.0, 0.22, vUv.y) * smoothstep(1.0, 0.36, vUv.y);
+
+    vec3 beamRgb = mix(uBeamSecondary, uBeamColor, clamp(coreCone * 1.35, 0.0, 1.0));
+    float alpha = (coreCone * 0.22 + outerAura * 0.09) * vertFade * rayBand * uIntensity * mix(0.35, 1.0, uIsDark);
+
+    gl_FragColor = vec4(beamRgb, alpha);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -514,17 +667,17 @@ function createCharacterPlaneMaterial(
       uFlip: { value: 0 },
       uTime: { value: 0 },
       uBreath: { value: 0 },
+      uTurnLean: { value: 0 },
       uRimBoost: { value: 0.16 },
       uLightSide: { value: -0.65 },
       uLightIntensity: { value: 1.0 },
       uIsDark: { value: initialIsDark ? 1 : 0 },
       uTexelSize: { value: initialTexelSize },
       uPointer: { value: new THREE.Vector2(0, 0) },
-      uKeyColor: { value: new THREE.Color('#FFF1DE') },
-      uFillColor: { value: new THREE.Color('#9BB4FF') },
-      uRimColor: {
-        value: new THREE.Color(initialIsDark ? '#D4A574' : '#3B5BDB'),
-      },
+      uKeyColor: { value: new THREE.Color(SECTION_LIGHT_PALETTES.about.key) },
+      uFillColor: { value: new THREE.Color(SECTION_LIGHT_PALETTES.about.fill) },
+      uRimColor: { value: new THREE.Color(SECTION_LIGHT_PALETTES.about.rim) },
+      uKickerColor: { value: new THREE.Color(SECTION_LIGHT_PALETTES.about.kicker) },
     },
     vertexShader: CHARACTER_VERTEX_SHADER,
     fragmentShader: CHARACTER_FRAGMENT_SHADER,
@@ -549,11 +702,35 @@ export function createAchrafCharacterStage(
   const textures: Partial<Record<CharacterPoseKey, THREE.CanvasTexture>> = {};
   let currentIsDark = initialIsDark;
 
-  // Intro T-Pose -> Hero Stance reveal timer (triggered when entering 2nd section)
-  let introTimer = 10;
-  const introHoldSeconds = 0.36;
-  const introMorphSeconds = 0.92;
+  // Direct PoseA -> PoseB smooth transition + Hero entry turn state
+  let fromPose = { ...SECTION_POSES.hero };
+  let toPose = { ...SECTION_POSES.hero };
+  let poseBlend = 1;
+  const poseTransitionSeconds = 0.56;
+  let transitionTurnDir = 1;
+
+  let entryTurnTimer = 10;
+  const entryTurnDuration = 0.85;
   let loadedReady = false;
+  let dampedScrollMotion = 0;
+
+  // Active smoothly interpolated section light mood colors
+  let targetPalette = SECTION_LIGHT_PALETTES.about;
+  const liveKeyColor = new THREE.Color(targetPalette.key);
+  const liveFillColor = new THREE.Color(targetPalette.fill);
+  const liveRimColor = new THREE.Color(targetPalette.rim);
+  const liveKickerColor = new THREE.Color(targetPalette.kicker);
+  const liveBeamColor = new THREE.Color(targetPalette.beam);
+  const liveBeamSecondary = new THREE.Color(targetPalette.beamSecondary);
+  const liveRingColor = new THREE.Color(targetPalette.ring);
+
+  const tmpTargetKey = new THREE.Color();
+  const tmpTargetFill = new THREE.Color();
+  const tmpTargetRim = new THREE.Color();
+  const tmpTargetKicker = new THREE.Color();
+  const tmpTargetBeam = new THREE.Color();
+  const tmpTargetBeamSec = new THREE.Color();
+  const tmpTargetRing = new THREE.Color();
 
   // Grounding: illuminated studio floor light pool + radial contact shadow + architectural ring
   const poolCanvas = document.createElement('canvas');
@@ -562,8 +739,8 @@ export function createAchrafCharacterStage(
   const pCtx = poolCanvas.getContext('2d');
   if (pCtx) {
     const grad = pCtx.createRadialGradient(128, 128, 10, 128, 128, 124);
-    grad.addColorStop(0, 'rgba(255, 240, 218, 0.42)');
-    grad.addColorStop(0.45, 'rgba(196, 149, 106, 0.16)');
+    grad.addColorStop(0, 'rgba(255, 255, 255, 0.5)');
+    grad.addColorStop(0.45, 'rgba(220, 220, 235, 0.18)');
     grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
     pCtx.fillStyle = grad;
     pCtx.fillRect(0, 0, 256, 256);
@@ -571,9 +748,10 @@ export function createAchrafCharacterStage(
   const poolTex = new THREE.CanvasTexture(poolCanvas);
   const floorPoolMat = new THREE.MeshBasicMaterial({
     map: poolTex,
+    color: liveBeamColor,
     transparent: true,
     depthWrite: false,
-    opacity: initialIsDark ? 0.55 : 0.22,
+    opacity: initialIsDark ? 0.36 : 0.22,
   });
   const floorPool = new THREE.Mesh(
     new THREE.PlaneGeometry(2.6, 2.6),
@@ -603,7 +781,7 @@ export function createAchrafCharacterStage(
     opacity: initialIsDark ? 0.72 : 0.4,
   });
   const contactShadow = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.45, 1.45),
+    new THREE.PlaneGeometry(1.18, 0.78),
     contactShadowMat,
   );
   contactShadow.rotation.x = -Math.PI / 2;
@@ -638,12 +816,15 @@ export function createAchrafCharacterStage(
   floorDisc.position.y = 0.006;
   group.add(floorDisc);
 
-  // Volumetric overhead studio spotlight cone behind Achraf
+  // Volumetric overhead dual-tone studio spotlight cone behind Achraf
   const beamMat = new THREE.ShaderMaterial({
     uniforms: {
-      uBeamColor: { value: new THREE.Color(initialIsDark ? '#E6C29F' : '#4C6EF5') },
+      uBeamColor: { value: liveBeamColor.clone() },
+      uBeamSecondary: { value: liveBeamSecondary.clone() },
       uIntensity: { value: 1.0 },
-      uLightSide: { value: -0.65 },
+      uLightSide: { value: 0.68 },
+      uTime: { value: 0 },
+      uPointer: { value: new THREE.Vector2(0, 0) },
       uIsDark: { value: initialIsDark ? 1 : 0 },
     },
     vertexShader: STUDIO_BEAM_VERTEX_SHADER,
@@ -653,10 +834,10 @@ export function createAchrafCharacterStage(
     side: THREE.DoubleSide,
   });
   const studioBeam = new THREE.Mesh(
-    new THREE.PlaneGeometry(2.8, 3.6),
+    new THREE.PlaneGeometry(3.1, 3.8),
     beamMat,
   );
-  studioBeam.position.set(0, 1.75, -0.22);
+  studioBeam.position.set(0, 1.78, -0.22);
   studioBeam.renderOrder = 1;
   group.add(studioBeam);
 
@@ -704,32 +885,58 @@ export function createAchrafCharacterStage(
     }
   };
 
+  const setSectionPose = (
+    section: StageSectionKey,
+    turnDirection = 1,
+    instant = false,
+  ) => {
+    targetPalette = SECTION_LIGHT_PALETTES[section];
+    if (instant) {
+      liveKeyColor.set(targetPalette.key);
+      liveFillColor.set(targetPalette.fill);
+      liveRimColor.set(targetPalette.rim);
+      liveKickerColor.set(targetPalette.kicker);
+      liveBeamColor.set(targetPalette.beam);
+      liveBeamSecondary.set(targetPalette.beamSecondary);
+      liveRingColor.set(targetPalette.ring);
+    }
+
+    const next = SECTION_POSES[section];
+    if (instant) {
+      fromPose = { ...next };
+      toPose = { ...next };
+      poseBlend = 1;
+      transitionTurnDir = turnDirection;
+      return;
+    }
+
+    if (toPose.key === next.key && toPose.flipX === next.flipX) {
+      return;
+    }
+
+    // Snapshot dominant active pose as starting frame so rapid section jumps never flash unrelated poses
+    fromPose = poseBlend >= 0.5 ? { ...toPose } : { ...fromPose };
+    toPose = { ...next };
+    poseBlend = 0;
+    transitionTurnDir = turnDirection >= 0 ? 1 : -1;
+  };
+
   const playIntroFromTPose = () => {
-    introTimer = 0;
+    fromPose = { ...SECTION_POSES.about };
+    toPose = { ...SECTION_POSES.about };
+    poseBlend = 1;
+    entryTurnTimer = 0;
   };
 
   const setTheme = (isDark: boolean) => {
     currentIsDark = isDark;
     const vis = THREE.MathUtils.clamp(state.stageOpacity, 0, 1);
-    contactShadowMat.opacity = (isDark ? 0.72 : 0.4) * vis;
-    floorPoolMat.opacity = (isDark ? 0.55 : 0.22) * vis;
-    floorRingMat.color.set(isDark ? '#C4956A' : '#1E3A8A');
-    floorRingMat.opacity = 0.34 * vis;
-    floorDiscMat.color.set(isDark ? '#C4956A' : '#1E3A8A');
-    floorDiscMat.opacity = (isDark ? 0.08 : 0.045) * vis;
-    const rim = isDark ? '#D4A574' : '#3B5BDB';
-    const key = isDark ? '#FFF1DE' : '#FFFDF8';
-    const fill = isDark ? '#9BB4FF' : '#93B4FF';
-    const beam = isDark ? '#E6C29F' : '#4C6EF5';
-    (matA.uniforms.uRimColor.value as THREE.Color).set(rim);
-    (matB.uniforms.uRimColor.value as THREE.Color).set(rim);
-    (matA.uniforms.uKeyColor.value as THREE.Color).set(key);
-    (matB.uniforms.uKeyColor.value as THREE.Color).set(key);
-    (matA.uniforms.uFillColor.value as THREE.Color).set(fill);
-    (matB.uniforms.uFillColor.value as THREE.Color).set(fill);
+    contactShadowMat.opacity = (isDark ? 0.78 : 0.4) * vis;
+    floorPoolMat.opacity = (isDark ? 0.36 : 0.22) * vis;
+    floorRingMat.opacity = 0.28 * vis;
+    floorDiscMat.opacity = (isDark ? 0.06 : 0.045) * vis;
     matA.uniforms.uIsDark.value = isDark ? 1 : 0;
     matB.uniforms.uIsDark.value = isDark ? 1 : 0;
-    (beamMat.uniforms.uBeamColor.value as THREE.Color).set(beam);
     beamMat.uniforms.uIsDark.value = isDark ? 1 : 0;
   };
 
@@ -745,103 +952,143 @@ export function createAchrafCharacterStage(
     group.visible = vis > 0.004;
     if (!group.visible) return;
 
-    introTimer += delta;
+    entryTurnTimer += delta;
+    if (poseBlend < 1) {
+      poseBlend = Math.min(1, poseBlend + delta / poseTransitionSeconds);
+    }
+
+    // Smoothly decay & damp scroll momentum for alive motion
+    dampedScrollMotion = THREE.MathUtils.damp(
+      dampedScrollMotion,
+      state.scrollMotion,
+      7.5,
+      delta,
+    );
+    state.scrollMotion = THREE.MathUtils.damp(state.scrollMotion, 0, 6.0, delta);
+
     const breath = Math.sin(elapsed * 2.0);
     const sway = Math.sin(elapsed * 0.9) * 0.022;
 
-    // Resolve active scroll pose pair (floor -> ceil)
-    const clampedSlot = THREE.MathUtils.clamp(
-      state.poseSlot,
-      0,
-      SCROLL_SEQUENCE.length - 1,
-    );
-    const idxA = Math.floor(clampedSlot);
-    const idxB = Math.min(SCROLL_SEQUENCE.length - 1, idxA + 1);
-    const rawFrac = clampedSlot - idxA;
-    // Smooth S-curve crossfade concentrated across middle of transition
-    const frac = rawFrac * rawFrac * (3 - 2 * rawFrac);
+    // Smooth S-curve crossfade directly from fromPose -> toPose
+    const frac = poseBlend * poseBlend * (3 - 2 * poseBlend);
+    const samePose =
+      fromPose.key === toPose.key && fromPose.flipX === toPose.flipX;
 
-    const stageA = SCROLL_SEQUENCE[idxA];
-    const stageB = SCROLL_SEQUENCE[idxB];
-    const scrollTexA = textures[stageA.key] ?? null;
-    const scrollTexB = textures[stageB.key] ?? null;
+    const texA = textures[fromPose.key] ?? null;
+    const texB = textures[toPose.key] ?? null;
 
-    // Intro T-pose reveal blends into active scroll pose
-    let tposeWeight = 0;
-    if (introTimer < introHoldSeconds) {
-      tposeWeight = 1;
-    } else if (introTimer < introHoldSeconds + introMorphSeconds) {
-      const t = (introTimer - introHoldSeconds) / introMorphSeconds;
-      const ease = 1 - Math.pow(1 - t, 3);
-      tposeWeight = 1 - ease;
-    }
-
-    if (tposeWeight > 0.005 && textures.tpose) {
-      matA.uniforms.uMap.value = textures.tpose;
-      matA.uniforms.uFlip.value = 0;
-      matA.uniforms.uOpacity.value = tposeWeight * vis;
-      matB.uniforms.uMap.value = scrollTexA;
-      matB.uniforms.uFlip.value = stageA.flipX ? 1 : 0;
-      matB.uniforms.uOpacity.value = (1 - tposeWeight) * vis;
+    if (samePose) {
+      matA.uniforms.uMap.value = texB;
+      matA.uniforms.uFlip.value = toPose.flipX ? 1 : 0;
+      matA.uniforms.uOpacity.value = vis;
+      matB.uniforms.uMap.value = null;
+      matB.uniforms.uOpacity.value = 0;
     } else {
-      matA.uniforms.uMap.value = scrollTexA;
-      matA.uniforms.uFlip.value = stageA.flipX ? 1 : 0;
-      matA.uniforms.uOpacity.value = (idxA === idxB ? 1 : 1 - frac) * vis;
-      matB.uniforms.uMap.value = scrollTexB;
-      matB.uniforms.uFlip.value = stageB.flipX ? 1 : 0;
-      matB.uniforms.uOpacity.value = (idxA === idxB ? 0 : frac) * vis;
+      matA.uniforms.uMap.value = texA;
+      matA.uniforms.uFlip.value = fromPose.flipX ? 1 : 0;
+      matA.uniforms.uOpacity.value = (1 - frac) * vis;
+      matB.uniforms.uMap.value = texB;
+      matB.uniforms.uFlip.value = toPose.flipX ? 1 : 0;
+      matB.uniforms.uOpacity.value = frac * vis;
     }
 
-    // Gentle turn motion during pose transitions & pointer parallax tilt
-    const turnKick =
-      tposeWeight > 0.005
-        ? Math.sin(tposeWeight * Math.PI) * 0.34
-        : Math.sin(frac * Math.PI) * 0.26;
+    // Hero turn-in kick when descending into #about + directional 3D arc during section transitions
+    let entryTurn = 0;
+    let entryScaleMul = 1;
+    if (entryTurnTimer < entryTurnDuration) {
+      const et = entryTurnTimer / entryTurnDuration;
+      const easeOut = 1 - Math.pow(1 - et, 3);
+      entryTurn = (1 - easeOut) * -0.44;
+      entryScaleMul = 0.95 + 0.05 * easeOut;
+    }
+
+    const transitionTurn = samePose
+      ? 0
+      : Math.sin(frac * Math.PI) * 0.24 * transitionTurnDir;
+    const transitionDepthArc = samePose ? 0 : Math.sin(frac * Math.PI) * 0.14;
 
     group.position.set(
       state.rootX + state.offsetX,
-      state.rootY + state.offsetY,
-      state.rootZ,
+      state.rootY + state.offsetY - dampedScrollMotion * 0.028,
+      state.rootZ + transitionDepthArc,
     );
-    group.scale.setScalar(state.scale);
+    group.scale.setScalar(state.scale * entryScaleMul);
     group.rotation.y =
-      state.rootRotY + sway + turnKick + pointerX * 0.16;
-    group.rotation.x = pointerY * 0.045;
-    group.rotation.z = state.tiltZ;
+      state.rootRotY + sway + entryTurn + transitionTurn + pointerX * 0.16;
+    group.rotation.x = pointerY * 0.045 + dampedScrollMotion * 0.025;
+    group.rotation.z = state.tiltZ - dampedScrollMotion * 0.022;
 
-    // Synchronize dynamic lighting & shader uniforms
+    // Smoothly interpolate creative lighting mood per section
+    const colorLerp = Math.min(1, delta * 3.8);
+    liveKeyColor.lerp(tmpTargetKey.set(targetPalette.key), colorLerp);
+    liveFillColor.lerp(tmpTargetFill.set(targetPalette.fill), colorLerp);
+    liveRimColor.lerp(tmpTargetRim.set(targetPalette.rim), colorLerp);
+    liveKickerColor.lerp(tmpTargetKicker.set(targetPalette.kicker), colorLerp);
+    liveBeamColor.lerp(tmpTargetBeam.set(targetPalette.beam), colorLerp);
+    liveBeamSecondary.lerp(tmpTargetBeamSec.set(targetPalette.beamSecondary), colorLerp);
+    liveRingColor.lerp(tmpTargetRing.set(targetPalette.ring), colorLerp);
+
+    // Synchronize dynamic lighting, 2.5D skeletal turn lean & shader uniforms
+    const activeTurnLean = entryTurn + transitionTurn - dampedScrollMotion * 0.22;
+
     matA.uniforms.uTime.value = elapsed;
     matA.uniforms.uBreath.value = breath;
+    matA.uniforms.uTurnLean.value = activeTurnLean;
     matA.uniforms.uRimBoost.value = state.rimBoost;
     matA.uniforms.uLightSide.value = state.lightSide;
     matA.uniforms.uLightIntensity.value = state.lightIntensity;
+    (matA.uniforms.uKeyColor.value as THREE.Color).copy(liveKeyColor);
+    (matA.uniforms.uFillColor.value as THREE.Color).copy(liveFillColor);
+    (matA.uniforms.uRimColor.value as THREE.Color).copy(liveRimColor);
+    (matA.uniforms.uKickerColor.value as THREE.Color).copy(liveKickerColor);
     (matA.uniforms.uPointer.value as THREE.Vector2).set(pointerX, pointerY);
 
     matB.uniforms.uTime.value = elapsed;
     matB.uniforms.uBreath.value = breath;
+    matB.uniforms.uTurnLean.value = activeTurnLean;
     matB.uniforms.uRimBoost.value = state.rimBoost;
     matB.uniforms.uLightSide.value = state.lightSide;
     matB.uniforms.uLightIntensity.value = state.lightIntensity;
+    (matB.uniforms.uKeyColor.value as THREE.Color).copy(liveKeyColor);
+    (matB.uniforms.uFillColor.value as THREE.Color).copy(liveFillColor);
+    (matB.uniforms.uRimColor.value as THREE.Color).copy(liveRimColor);
+    (matB.uniforms.uKickerColor.value as THREE.Color).copy(liveKickerColor);
     (matB.uniforms.uPointer.value as THREE.Vector2).set(pointerX, pointerY);
 
+    (beamMat.uniforms.uBeamColor.value as THREE.Color).copy(liveBeamColor);
+    (beamMat.uniforms.uBeamSecondary.value as THREE.Color).copy(liveBeamSecondary);
+    beamMat.uniforms.uTime.value = elapsed;
     beamMat.uniforms.uIntensity.value =
       state.lightIntensity * (0.92 + breath * 0.08) * vis;
     beamMat.uniforms.uLightSide.value = state.lightSide;
+    (beamMat.uniforms.uPointer.value as THREE.Vector2).set(pointerX, pointerY);
 
-    contactShadowMat.opacity = (currentIsDark ? 0.72 : 0.4) * vis;
-    floorPoolMat.opacity = (currentIsDark ? 0.55 : 0.22) * vis;
-    floorRingMat.opacity = 0.34 * vis;
-    floorDiscMat.opacity = (currentIsDark ? 0.08 : 0.045) * vis;
+    floorPoolMat.color.copy(liveBeamColor);
+    floorRingMat.color.copy(liveRingColor);
+    floorDiscMat.color.copy(liveRingColor);
 
-    floorRing.rotation.z = elapsed * 0.18;
+    contactShadowMat.opacity = (currentIsDark ? 0.78 : 0.4) * vis;
+    floorPoolMat.opacity = (currentIsDark ? 0.34 : 0.22) * vis;
+    floorRingMat.opacity = 0.3 * vis;
+    floorDiscMat.opacity = (currentIsDark ? 0.065 : 0.045) * vis;
+
+    floorRing.rotation.z = elapsed * 0.18 + dampedScrollMotion * 0.12;
+    floorPool.position.x = -state.lightSide * 0.08 + pointerX * 0.04;
     floorPool.scale.setScalar(0.95 + state.lightIntensity * 0.08 + breath * 0.02);
   };
 
   return {
     group,
     state,
+    activeLightColors: {
+      key: liveKeyColor,
+      rim: liveRimColor,
+      fill: liveFillColor,
+      beam: liveBeamColor,
+    },
     loadAllPoses,
     update,
+    setSectionPose,
     playIntroFromTPose,
     setTheme,
   };

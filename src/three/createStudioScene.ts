@@ -7,6 +7,7 @@ import {
   createAchrafCharacterStage,
   type AchrafStageHandle,
   type CharacterStageState,
+  type StageSectionKey,
 } from './achrafCharacterStage';
 
 export interface StudioSceneCallbacks {
@@ -23,6 +24,7 @@ export interface StudioSceneController {
   characterState: CharacterStageState | null;
   setPointerTarget: (nx: number, ny: number) => void;
   setScrollAnimationProgress: (progress: number) => void;
+  setSectionPose: (section: StageSectionKey, turnDirection?: number, instant?: boolean) => void;
   setTheme: (isDark: boolean) => void;
   replaySketch: () => void;
   resize: () => void;
@@ -47,38 +49,98 @@ function detectSoftwareWebGL(): boolean {
   }
 }
 
+function createBokehTexture(): THREE.CanvasTexture {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const half = size * 0.5;
+    const grad = ctx.createRadialGradient(half, half, 0, half, half, half);
+    grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    grad.addColorStop(0.28, 'rgba(255, 255, 255, 0.68)');
+    grad.addColorStop(0.62, 'rgba(255, 255, 255, 0.16)');
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 function createAmbientParticles(count: number): {
   points: THREE.Points;
-  update: (delta: number) => void;
+  material: THREE.PointsMaterial;
+  texture: THREE.CanvasTexture;
+  update: (elapsed: number, delta: number, stageVis: number) => void;
 } {
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const seeds = new Float32Array(count * 2);
+
+  const warmGold = new THREE.Color('#E8C294');
+  const lapisBlue = new THREE.Color('#6B8CFF');
+  const warmIvory = new THREE.Color('#FFF2E0');
 
   for (let i = 0; i < count; i++) {
-    positions[i * 3] = (Math.random() - 0.5) * 18;
-    positions[i * 3 + 1] = (Math.random() - 0.5) * 14;
-    positions[i * 3 + 2] = (Math.random() - 0.5) * 10 - 2;
+    positions[i * 3] = (Math.random() - 0.5) * 16;
+    positions[i * 3 + 1] = (Math.random() - 0.5) * 12;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 8 - 1.5;
+
+    seeds[i * 2] = 0.04 + Math.random() * 0.09; // upward thermal drift speed
+    seeds[i * 2 + 1] = Math.random() * Math.PI * 2; // sway phase
+
+    const palettePick = i % 5;
+    const c =
+      palettePick === 0 || palettePick === 2
+        ? warmGold
+        : palettePick === 1 || palettePick === 3
+          ? lapisBlue
+          : warmIvory;
+    colors[i * 3] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
   }
 
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
+  const texture = createBokehTexture();
   const material = new THREE.PointsMaterial({
-    size: 0.028,
-    color: new THREE.Color('#4C6EF5'),
+    size: 0.085,
+    map: texture,
+    vertexColors: true,
     transparent: true,
-    opacity: 0.25,
+    opacity: 0.28,
+    blending: THREE.AdditiveBlending,
     sizeAttenuation: true,
     depthWrite: false,
   });
 
   const points = new THREE.Points(geometry, material);
 
-  const update = (delta: number) => {
-    points.rotation.y += delta * 0.01;
-    points.rotation.x += delta * 0.004;
+  const update = (elapsed: number, delta: number, stageVis: number) => {
+    const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+    const arr = posAttr.array as Float32Array;
+    for (let i = 0; i < count; i++) {
+      const drift = seeds[i * 2];
+      const phase = seeds[i * 2 + 1];
+      arr[i * 3 + 1] += delta * drift;
+      arr[i * 3] += Math.sin(elapsed * 0.45 + phase) * delta * 0.025;
+      if (arr[i * 3 + 1] > 6.2) {
+        arr[i * 3 + 1] = -6.2;
+      }
+    }
+    posAttr.needsUpdate = true;
+    points.rotation.y += delta * 0.008;
+    material.opacity = THREE.MathUtils.lerp(0.16, 0.38, stageVis);
   };
 
-  return { points, update };
+  return { points, material, texture, update };
 }
 
 function normalizeModelToOrigin(model: THREE.Object3D, targetSize = 2.6): void {
@@ -188,7 +250,7 @@ export function createStudioScene(
   accentRimPoint.position.set(2.4, 1.4, -0.8);
   scene.add(accentRimPoint);
 
-  const particles = createAmbientParticles(65);
+  const particles = createAmbientParticles(80);
   scene.add(particles.points);
 
   const motionRig = new THREE.Group();
@@ -359,45 +421,64 @@ export function createStudioScene(
       pointerCurrent.y = THREE.MathUtils.damp(pointerCurrent.y, pointerTarget.y, 5.5, delta);
 
       characterStage?.update(elapsed, delta, pointerCurrent.x, pointerCurrent.y);
-      particles.update(delta);
+      const stageVis = characterStage
+        ? THREE.MathUtils.clamp(characterStage.state.stageOpacity, 0, 1)
+        : 1;
+      particles.update(elapsed, delta, stageVis);
 
       if (characterStage) {
         const cx = characterStage.group.position.x;
         const cy = characterStage.group.position.y + 1.2;
         const cz = characterStage.group.position.z;
         const lightSide = characterStage.state.lightSide;
+
+        // Sync Three.js physical lights seamlessly with per-section creative lighting mood
+        keyLight.color.copy(characterStage.activeLightColors.key);
+        fillLight.color.copy(characterStage.activeLightColors.fill);
+        rimLight.color.copy(characterStage.activeLightColors.rim);
+        studioSpotLight.color.copy(characterStage.activeLightColors.key);
+        accentRimPoint.color.copy(characterStage.activeLightColors.rim);
+
+        keyLight.position.x = THREE.MathUtils.damp(
+          keyLight.position.x,
+          lightSide * 3.8 + pointerCurrent.x * 1.15,
+          4.5,
+          delta,
+        );
+        keyLight.position.y = THREE.MathUtils.damp(
+          keyLight.position.y,
+          5.0 + pointerCurrent.y * 0.85,
+          4.5,
+          delta,
+        );
+
         studioSpotLight.position.x = THREE.MathUtils.damp(
           studioSpotLight.position.x,
-          cx + lightSide * 1.45,
+          cx + lightSide * 1.45 + pointerCurrent.x * 0.38,
           4.5,
           delta,
         );
         studioSpotLight.position.y = THREE.MathUtils.damp(
           studioSpotLight.position.y,
-          cy + 2.4,
+          cy + 2.4 + pointerCurrent.y * 0.28,
           4.5,
           delta,
-        );
-        const stageVis = THREE.MathUtils.clamp(
-          characterStage.state.stageOpacity,
-          0,
-          1,
         );
         studioSpotLight.target.position.set(cx, cy, cz);
         studioSpotLight.target.updateMatrixWorld();
         studioSpotLight.intensity =
-          10.5 * characterStage.state.lightIntensity * stageVis;
+          11.2 * characterStage.state.lightIntensity * stageVis;
 
         accentRimPoint.position.x = THREE.MathUtils.damp(
           accentRimPoint.position.x,
-          cx - lightSide * 1.15,
+          cx - lightSide * 1.15 - pointerCurrent.x * 0.22,
           4.5,
           delta,
         );
-        accentRimPoint.position.y = cy + 0.5;
+        accentRimPoint.position.y = cy + 0.55;
         accentRimPoint.position.z = cz - 0.9;
         accentRimPoint.intensity =
-          (3.8 + characterStage.state.rimBoost * 4.5) * stageVis;
+          (4.2 + characterStage.state.rimBoost * 4.8) * stageVis;
       }
     } else {
       characterStage?.update(2, 2, 0, 0);
@@ -442,6 +523,14 @@ export function createStudioScene(
     studioSpotLight.color.set(dark ? 0xffe7c8 : 0xfff8ee);
   };
 
+  const setSectionPose = (
+    section: StageSectionKey,
+    turnDirection = 1,
+    instant = false,
+  ) => {
+    characterStage?.setSectionPose(section, turnDirection, instant);
+  };
+
   const replaySketch = () => {
     characterStage?.playIntroFromTPose();
   };
@@ -471,6 +560,7 @@ export function createStudioScene(
     }
 
     disposeObject3D(scene);
+    particles.texture.dispose();
     envRenderTarget.dispose();
     dracoLoader.dispose();
     renderer.dispose();
@@ -489,6 +579,7 @@ export function createStudioScene(
     characterState: characterStage?.state ?? null,
     setPointerTarget,
     setScrollAnimationProgress,
+    setSectionPose,
     setTheme,
     replaySketch,
     resize,

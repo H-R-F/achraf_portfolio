@@ -411,7 +411,7 @@ const PROJECTS: ProjectItem[] = [
     governanceLens:
       'Maps directly to operational resilience mandates and cybersecurity continuity planning.',
     techLine: 'Go · Systems · Fault Injection · Resilience',
-    github: 'https://github.com/sabir7achraf/Chaos-Engineering-Playground',
+    github: 'https://github.com/H-R-F/Chaos-Engineering-Playground',
   },
   {
     number: '02',
@@ -427,7 +427,7 @@ const PROJECTS: ProjectItem[] = [
     governanceLens:
       'Reinforces transparent, verifiable algorithmic tradeoffs over opaque heuristic black boxes.',
     techLine: 'Java · Algorithms · Graph Theory · Heuristics',
-    github: 'https://github.com/sabir7achraf/Traveling-Salesman-Problem',
+    github: 'https://github.com/H-R-F/Traveling-Salesman-Problem',
   },
   {
     number: '03',
@@ -443,7 +443,7 @@ const PROJECTS: ProjectItem[] = [
     governanceLens:
       'Type safety and explicit data schemas mirror clear contractual boundaries in software.',
     techLine: 'TypeScript · Web Architecture · UI Systems',
-    github: 'https://github.com/sabir7achraf/LASAN',
+    github: 'https://github.com/H-R-F/LASAN',
   },
   {
     number: '04',
@@ -459,7 +459,7 @@ const PROJECTS: ProjectItem[] = [
     governanceLens:
       'Requires clean separation of user roles, data access boundaries, and auditability.',
     techLine: 'Spring Boot · Angular · Full Stack · REST APIs',
-    github: 'https://github.com/sabir7achraf/MYO',
+    github: 'https://github.com/H-R-F/MYO',
   },
   {
     number: '05',
@@ -475,7 +475,7 @@ const PROJECTS: ProjectItem[] = [
     governanceLens:
       'Infrastructure as Code makes security controls auditable, version-controlled, and compliant by design.',
     techLine: 'Terraform · HCL · Cloud Provisioning · IaC',
-    github: 'https://github.com/sabir7achraf/Terraform',
+    github: 'https://github.com/H-R-F/Terraform',
   },
   {
     number: '06',
@@ -491,7 +491,7 @@ const PROJECTS: ProjectItem[] = [
     governanceLens:
       'Highlights consent, biometric voice data minimization, and transparency in AI interfaces.',
     techLine: 'JavaScript · Web APIs · Audio Processing · Accessibility',
-    github: 'https://github.com/sabir7achraf/Speech-Recognition',
+    github: 'https://github.com/H-R-F/Speech-Recognition',
   },
 ];
 
@@ -965,7 +965,7 @@ export function Contact() {
             Connect on LinkedIn <ArrowRight size={16} />
           </a>
           <a
-            href="https://github.com/sabir7achraf"
+            href="https://github.com/H-R-F"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-7 py-3.5 border border-white/15 bg-[#12141A] text-cream text-sm font-medium rounded-md hover:border-accent-light transition-colors whitespace-nowrap shrink-0"

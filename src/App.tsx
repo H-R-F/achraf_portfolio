@@ -76,7 +76,7 @@ function Header() {
           href="#hero"
           className="inline-flex items-center gap-3 font-display text-lg font-extrabold tracking-tight whitespace-nowrap shrink-0 text-cream"
         >
-          <PortraitLogo isDark={true} size={40} />
+          <PortraitLogo isDark={true} size={42} />
           <span>Achraf Ben Sabir</span>
         </a>
 
@@ -327,6 +327,14 @@ function Hero() {
         </div>
         {/* Left-to-right obsidian studio melt keeping headline 100% legible and seam invisible */}
         <div className="absolute inset-0 bg-gradient-to-r from-[#090B0E] via-[#090B0E]/68 to-transparent" />
+        {/* Subtle studio rim light wash bridging video ambiance to the scroll lighting rig */}
+        <div
+          className="absolute inset-0 opacity-75"
+          style={{
+            background:
+              'radial-gradient(62% 58% at 74% 38%, rgba(232, 194, 148, 0.11) 0%, rgba(91, 124, 250, 0.08) 42%, transparent 74%)',
+          }}
+        />
         {/* Vertical cinematic edge scrims */}
         <div className="absolute inset-0 bg-gradient-to-b from-[#090B0E]/55 via-transparent to-[#090B0E]/90" />
       </div>
@@ -394,7 +402,7 @@ function Hero() {
               </a>
               <div className="flex items-center gap-4 pl-1">
                 <a
-                  href="https://github.com/sabir7achraf"
+                  href="https://github.com/H-R-F"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 text-sm text-stone-light hover:text-cream transition-colors whitespace-nowrap shrink-0"
@@ -615,7 +623,7 @@ export default function App() {
                 LinkedIn
               </a>
               <a
-                href="https://github.com/sabir7achraf"
+                href="https://github.com/H-R-F"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hover:text-cream transition-colors"
